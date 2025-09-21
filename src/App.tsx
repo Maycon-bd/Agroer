@@ -2,21 +2,36 @@ import React, { useState } from 'react';
 import './App.css';
 
 interface ExtractedData {
-  numeroNota: string;
-  serie: string;
-  dataEmissao: string;
   fornecedor: {
-    nome: string;
-    cnpj: string;
-    endereco: string;
+    razaoSocial: string | null;
+    nomeFantasia: string | null;
+    cnpj: string | null;
   };
-  valorTotal: number;
-  itens: Array<{
-    descricao: string;
-    quantidade: number;
-    valorUnitario: number;
-    valorTotal: number;
+  faturado: {
+    nomeCompleto: string | null;
+    cpf: string | null;
+  };
+  numeroNotaFiscal: string | null;
+  dataEmissao: string | null;
+  descricaoProdutos: string | null;
+  parcelas: Array<{
+    numero: number;
+    dataVencimento: string | null;
+    valor: number;
   }>;
+  valorTotal: number;
+  classificacoesDespesa: Array<{
+    categoria: string;
+    subcategoria: string;
+    percentual: number;
+    valor: number;
+    justificativa: string;
+  }>;
+  metadata?: {
+    extractedAt: string;
+    textLength: number;
+    processingVersion: string;
+  };
 }
 
 function App() {
@@ -24,32 +39,9 @@ function App() {
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [viewMode, setViewMode] = useState<'formatted' | 'json'>('json');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const mockData: ExtractedData = {
-    numeroNota: "000008438",
-    serie: "001",
-    dataEmissao: "2025-01-15",
-    fornecedor: {
-      nome: "EMPRESA EXEMPLO LTDA",
-      cnpj: "13.142.597/0001-46",
-      endereco: "Rua das Flores, 123 - Centro - São Paulo/SP"
-    },
-    valorTotal: 1250.75,
-    itens: [
-      {
-        descricao: "Produto A",
-        quantidade: 2,
-        valorUnitario: 500.00,
-        valorTotal: 1000.00
-      },
-      {
-        descricao: "Produto B",
-        quantidade: 1,
-        valorUnitario: 250.75,
-        valorTotal: 250.75
-      }
-    ]
-  };
+  const API_BASE_URL = 'http://localhost:3001/api';
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -62,19 +54,48 @@ function App() {
     }
   };
 
-  const handleExtractData = () => {
+  const handleExtractData = async () => {
     if (!selectedFile) {
       alert('Por favor, selecione um arquivo PDF primeiro.');
       return;
     }
 
     setIsProcessing(true);
+    setError(null);
+    setExtractedData(null);
     
-    // Simula processamento
-    setTimeout(() => {
-      setExtractedData(mockData);
+    try {
+      const formData = new FormData();
+      formData.append('pdf', selectedFile);
+      
+      console.log('📤 Enviando arquivo para processamento...');
+      
+      const response = await fetch(`${API_BASE_URL}/pdf/extract`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Erro ao processar arquivo');
+      }
+      
+      if (result.success && result.data) {
+        console.log('✅ Dados extraídos com sucesso:', result.data);
+        setExtractedData(result.data);
+      } else {
+        throw new Error('Resposta inválida do servidor');
+      }
+      
+    } catch (err) {
+      console.error('❌ Erro no processamento:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      setError(errorMessage);
+      alert(`Erro ao processar arquivo: ${errorMessage}`);
+    } finally {
       setIsProcessing(false);
-    }, 2000);
+    }
   };
 
   const copyToClipboard = () => {
@@ -125,6 +146,16 @@ function App() {
           </button>
         </div>
 
+        {/* Seção de Erro */}
+        {error && (
+          <div className="error-section">
+            <div className="error-message">
+              <span className="error-icon">⚠️</span>
+              <span>{error}</span>
+            </div>
+          </div>
+        )}
+
         {/* Seção de Dados Extraídos */}
         {extractedData && (
           <div className="data-section">
@@ -155,7 +186,71 @@ function App() {
                 </div>
               ) : (
                 <div className="formatted-view">
-                  <p>Visualização formatada será implementada em breve...</p>
+                  <div className="invoice-summary">
+                    <h3>📄 Resumo da Nota Fiscal</h3>
+                    <div className="summary-grid">
+                      <div className="summary-item">
+                        <strong>Número:</strong> {extractedData.numeroNotaFiscal || 'Não informado'}
+                      </div>
+                      <div className="summary-item">
+                        <strong>Data de Emissão:</strong> {extractedData.dataEmissao || 'Não informada'}
+                      </div>
+                      <div className="summary-item">
+                        <strong>Valor Total:</strong> R$ {extractedData.valorTotal?.toFixed(2) || '0,00'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="invoice-details">
+                    <div className="detail-section">
+                      <h4>🏢 Fornecedor</h4>
+                      <p><strong>Razão Social:</strong> {extractedData.fornecedor?.razaoSocial || 'Não informado'}</p>
+                      <p><strong>Nome Fantasia:</strong> {extractedData.fornecedor?.nomeFantasia || 'Não informado'}</p>
+                      <p><strong>CNPJ:</strong> {extractedData.fornecedor?.cnpj || 'Não informado'}</p>
+                    </div>
+
+                    {extractedData.faturado && (
+                      <div className="detail-section">
+                        <h4>👤 Faturado</h4>
+                        <p><strong>Nome:</strong> {extractedData.faturado.nomeCompleto || 'Não informado'}</p>
+                        <p><strong>CPF:</strong> {extractedData.faturado.cpf || 'Não informado'}</p>
+                      </div>
+                    )}
+
+                    {extractedData.descricaoProdutos && (
+                      <div className="detail-section">
+                        <h4>📦 Produtos/Serviços</h4>
+                        <p>{extractedData.descricaoProdutos}</p>
+                      </div>
+                    )}
+
+                    {extractedData.classificacoesDespesa && extractedData.classificacoesDespesa.length > 0 && (
+                      <div className="detail-section">
+                        <h4>🏷️ Classificação de Despesas</h4>
+                        {extractedData.classificacoesDespesa.map((classificacao, index) => (
+                          <div key={index} className="expense-classification">
+                            <p><strong>Categoria:</strong> {classificacao.categoria}</p>
+                            <p><strong>Subcategoria:</strong> {classificacao.subcategoria}</p>
+                            <p><strong>Percentual:</strong> {classificacao.percentual.toFixed(1)}%</p>
+                            <p><strong>Valor:</strong> R$ {classificacao.valor.toFixed(2)}</p>
+                            <p><strong>Justificativa:</strong> {classificacao.justificativa}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {extractedData.parcelas && extractedData.parcelas.length > 0 && (
+                      <div className="detail-section">
+                        <h4>💰 Parcelas</h4>
+                        {extractedData.parcelas.map((parcela, index) => (
+                          <div key={index} className="installment">
+                            <p><strong>Parcela {parcela.numero}:</strong> R$ {parcela.valor.toFixed(2)}</p>
+                            {parcela.dataVencimento && <p><strong>Vencimento:</strong> {parcela.dataVencimento}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
