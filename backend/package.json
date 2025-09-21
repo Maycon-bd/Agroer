@@ -1,0 +1,38 @@
+{
+  "name": "agroer-backend",
+  "version": "1.0.0",
+  "description": "Backend para processamento de notas fiscais em PDF usando LLM Gemini",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "pdf",
+    "invoice",
+    "gemini",
+    "llm",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "form-data": "^4.0.4",
+    "helmet": "^7.1.0",
+    "jspdf": "^3.0.3",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "pdf2pic": "^2.1.4",
+    "tesseract.js": "^5.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
