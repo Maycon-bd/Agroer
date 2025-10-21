@@ -32,24 +32,48 @@ export async function extractTextFromPDF(pdfBuffer) {
     console.log('🤖 Enviando PDF para o Gemini...');
     
     let extractedText;
-    try {
-      const result = await visionModel.generateContent([
-        {
-          text: "Extraia todo o texto desta nota fiscal em português. Mantenha a formatação e estrutura original do documento."
-        },
-        {
-          inlineData: {
-            mimeType: "application/pdf",
-            data: base64Data
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    while (retryCount <= maxRetries) {
+      try {
+        console.log(`🤖 Tentativa ${retryCount + 1}/${maxRetries + 1} - Enviando PDF para o Gemini...`);
+        
+        const result = await visionModel.generateContent([
+          {
+            text: "Extraia todo o texto desta nota fiscal em português. Mantenha a formatação e estrutura original do documento."
+          },
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: base64Data
+            }
           }
+        ]);
+        
+        extractedText = result.response.text();
+        console.log('✅ Texto extraído com sucesso, tamanho:', extractedText.length, 'caracteres');
+        break; // Sucesso, sair do loop
+        
+      } catch (geminiError) {
+        console.error(`❌ Erro do Gemini (tentativa ${retryCount + 1}):`, geminiError.message);
+        
+        // Verificar se é erro de sobrecarga (503) ou quota (429)
+        const isRetryableError = geminiError.status === 503 || 
+                                geminiError.status === 429 || 
+                                geminiError.message.includes('overloaded') ||
+                                geminiError.message.includes('quota');
+        
+        if (isRetryableError && retryCount < maxRetries) {
+          const waitTime = Math.pow(2, retryCount) * 1000; // Backoff exponencial: 1s, 2s, 4s
+          console.log(`⏳ Aguardando ${waitTime/1000}s antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          retryCount++;
+        } else {
+          // Não é erro recuperável ou esgotaram as tentativas
+          throw geminiError;
         }
-      ]);
-      
-      extractedText = result.response.text();
-      console.log('✅ Texto extraído com sucesso, tamanho:', extractedText.length, 'caracteres');
-    } catch (geminiError) {
-      console.error('❌ Erro do Gemini:', geminiError.message);
-      throw geminiError;
+      }
     }
     
     if (!extractedText || extractedText.trim().length === 0) {
@@ -79,12 +103,41 @@ export async function processWithGemini(pdfText) {
     }
     
     const prompt = createInvoicePrompt(pdfText);
-    console.log('🔄 Enviando prompt para o Gemini...');
     const model = getGeminiModel();
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-    console.log('✅ Resposta do Gemini recebida, tamanho:', text.length, 'caracteres');
+    
+    const maxRetries = 3;
+    let retryCount = 0;
+    let text;
+    
+    while (retryCount <= maxRetries) {
+      try {
+        console.log(`🔄 Tentativa ${retryCount + 1}/${maxRetries + 1} - Enviando prompt para o Gemini...`);
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        text = response.text();
+        console.log('✅ Resposta do Gemini recebida, tamanho:', text.length, 'caracteres');
+        break; // Sucesso, sair do loop
+        
+      } catch (geminiError) {
+        console.error(`❌ Erro do Gemini no processamento (tentativa ${retryCount + 1}):`, geminiError.message);
+        
+        // Verificar se é erro de sobrecarga (503) ou quota (429)
+        const isRetryableError = geminiError.status === 503 || 
+                                geminiError.status === 429 || 
+                                geminiError.message.includes('overloaded') ||
+                                geminiError.message.includes('quota');
+        
+        if (isRetryableError && retryCount < maxRetries) {
+          const waitTime = Math.pow(2, retryCount) * 1000; // Backoff exponencial: 1s, 2s, 4s
+          console.log(`⏳ Aguardando ${waitTime/1000}s antes da próxima tentativa...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          retryCount++;
+        } else {
+          // Não é erro recuperável ou esgotaram as tentativas
+          throw geminiError;
+        }
+      }
+    }
     
     // Tentar extrair JSON da resposta
     let extractedData;
