@@ -1,5 +1,5 @@
 # Dockerfile para Frontend React
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Definir diretório de trabalho
 WORKDIR /app
@@ -7,8 +7,8 @@ WORKDIR /app
 # Copiar arquivos de dependências
 COPY package*.json ./
 
-# Instalar dependências
-RUN npm ci --only=production
+# Instalar dependências (inclui devDependencies para rodar Vite em modo dev)
+RUN npm ci
 
 # Copiar código fonte
 COPY . .

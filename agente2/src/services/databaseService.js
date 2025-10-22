@@ -65,17 +65,18 @@ class DatabaseService {
   // Criar novo fornecedor
   async criarFornecedor(dadosFornecedor) {
     try {
-      // Primeiro verificar se o fornecedor já existe
+      // Primeiro verificar se a pessoa já existe (independente do tipo de relacionamento)
       const checkQuery = `
-        SELECT id, nome, documento 
+        SELECT id, nome, documento, tipo_relacionamento
         FROM Pessoas 
-        WHERE documento = $1 AND tipo_relacionamento = 'FORNECEDOR'
+        WHERE documento = $1
       `;
       
       const existingResult = await pool.query(checkQuery, [dadosFornecedor.documento]);
       
       if (existingResult.rows.length > 0) {
-        // Se já existe, retorna o fornecedor existente
+        // Se já existe, retorna a pessoa existente
+        console.log(`✅ Pessoa já existe no banco: ${existingResult.rows[0].nome} (${existingResult.rows[0].tipo_relacionamento})`);
         return existingResult.rows[0];
       }
       
@@ -107,17 +108,18 @@ class DatabaseService {
   // Criar novo faturado
   async criarFaturado(dadosFaturado) {
     try {
-      // Primeiro verificar se o faturado já existe
+      // Primeiro verificar se a pessoa já existe (independente do tipo de relacionamento)
       const checkQuery = `
-        SELECT id, nome, documento 
+        SELECT id, nome, documento, tipo_relacionamento
         FROM Pessoas 
-        WHERE documento = $1 AND tipo_relacionamento = 'FATURADO'
+        WHERE documento = $1
       `;
       
       const existingResult = await pool.query(checkQuery, [dadosFaturado.documento]);
       
       if (existingResult.rows.length > 0) {
-        // Se já existe, retorna o faturado existente
+        // Se já existe, retorna a pessoa existente
+        console.log(`✅ Pessoa já existe no banco: ${existingResult.rows[0].nome} (${existingResult.rows[0].tipo_relacionamento})`);
         return existingResult.rows[0];
       }
       

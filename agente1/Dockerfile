@@ -13,8 +13,17 @@ RUN npm ci --only=production
 # Copiar código fonte
 COPY . .
 
+# Criar usuário não-root para segurança
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S agente1 -u 1001
+USER agente1
+
 # Expor porta
 EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
 # Comando para iniciar a aplicação
 CMD ["npm", "start"]

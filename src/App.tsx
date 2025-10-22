@@ -68,8 +68,16 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const API_BASE_URL = 'http://localhost:3001/api';
-  const VALIDATION_API_URL = 'http://localhost:3002/api';
+  const API_BASE_URL = (import.meta as any)?.env?.VITE_AGENTE1_URL ? `${(import.meta as any).env.VITE_AGENTE1_URL}/api` : 'http://localhost:3001/api';
+  const VALIDATION_API_URL = (import.meta as any)?.env?.VITE_AGENTE2_URL ? `${(import.meta as any).env.VITE_AGENTE2_URL}/api` : 'http://localhost:3002/api';
+
+  // Debug logs
+  console.log('🔧 Debug - Variáveis de ambiente:', {
+    VITE_AGENTE1_URL: (import.meta as any)?.env?.VITE_AGENTE1_URL,
+    VITE_AGENTE2_URL: (import.meta as any)?.env?.VITE_AGENTE2_URL,
+    API_BASE_URL,
+    VALIDATION_API_URL
+  });
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -94,14 +102,19 @@ function App() {
     
     try {
       const formData = new FormData();
-      formData.append('pdf', selectedFile);
+      formData.append('file', selectedFile);
       
       console.log('📤 Enviando arquivo para processamento...');
+      console.log('🔧 Debug - URL da requisição:', `${API_BASE_URL}/pdf/extract`);
+      console.log('🔧 Debug - Arquivo selecionado:', selectedFile.name, selectedFile.size, 'bytes');
       
       const response = await fetch(`${API_BASE_URL}/pdf/extract`, {
         method: 'POST',
         body: formData,
       });
+      
+      console.log('🔧 Debug - Response status:', response.status, response.statusText);
+      console.log('🔧 Debug - Response headers:', Object.fromEntries(response.headers.entries()));
       
       const result = await response.json();
       

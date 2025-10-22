@@ -12,7 +12,7 @@ async function testPDFUpload() {
     
     // Criar FormData
     const formData = new FormData();
-    formData.append('pdf', pdfBuffer, {
+    formData.append('file', pdfBuffer, {
       filename: 'nota-fiscal-teste.pdf',
       contentType: 'application/pdf'
     });

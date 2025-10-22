@@ -5,41 +5,45 @@ Write-Host "🔍 Verificando Serviços Agroer..." -ForegroundColor Cyan
 Write-Host "=================================" -ForegroundColor Cyan
 
 # Função para testar conectividade
+param (
+    [switch]$Verbose
+)
+
 function Test-Service {
-    param(
+    param (
         [string]$Name,
         [string]$Url,
         [string]$ExpectedContent = ""
     )
     
-    Write-Host "📡 Testando $Name..." -ForegroundColor Yellow
+    Write-Host "🌐 Testando $Name ($Url)..." -ForegroundColor Yellow
     
     try {
-        $response = Invoke-WebRequest -Uri $Url -TimeoutSec 10 -UseBasicParsing
-        
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
         if ($response.StatusCode -eq 200) {
-            if ($ExpectedContent -and $response.Content -notlike "*$ExpectedContent*") {
-                Write-Host "   X $Name`: Resposta inesperada" -ForegroundColor Red
+            if ([string]::IsNullOrEmpty($ExpectedContent) -or $response.Content -match $ExpectedContent) {
+                Write-Host "   ✅ $Name: OK" -ForegroundColor Green
+                return $true
+            } else {
+                Write-Host "   ⚠️ $Name: Conteúdo inesperado" -ForegroundColor DarkYellow
                 return $false
             }
-            Write-Host "   OK $Name`: OK (Status: $($response.StatusCode))" -ForegroundColor Green
-            return $true
         } else {
-            Write-Host "   X $Name`: Status $($response.StatusCode)" -ForegroundColor Red
+            Write-Host "   ❌ $Name: Status $($response.StatusCode)" -ForegroundColor Red
             return $false
         }
     }
     catch {
-        Write-Host "   X $Name`: Erro de conexao - $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "   ❌ $Name: Erro ao acessar" -ForegroundColor Red
+        if ($Verbose) { Write-Host $_.Exception.Message }
         return $false
     }
 }
 
-# Função para testar porta
 function Test-Port {
-    param(
+    param (
         [string]$ServiceName,
-        [string]$HostName,
+        [string]$HostName = "localhost",
         [int]$Port
     )
     
@@ -87,8 +91,8 @@ Write-Host ""
 # Testar serviços
 $services = @(
     @{ Name = "Frontend"; Url = "http://localhost:5173"; Content = "Agroer" },
-    @{ Name = "Agente1 (PDF)"; Url = "http://localhost:3001/health"; Content = "" },
-    @{ Name = "Agente2 (DB)"; Url = "http://localhost:3002/health"; Content = "" },
+    @{ Name = "Agente1 (PDF)"; Url = "http://localhost:3001/api/health"; Content = "OK" },
+    @{ Name = "Agente2 (DB)"; Url = "http://localhost:3002/api/health"; Content = "OK" },
     @{ Name = "pgAdmin"; Url = "http://localhost:8080"; Content = "pgAdmin" }
 )
 
