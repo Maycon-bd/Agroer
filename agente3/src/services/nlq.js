@@ -51,6 +51,7 @@ export function detectMovementType(q) {
 function detectMetric(q) {
   const t = lower(q);
   if (t.includes('quantas') || t.includes('qtd') || t.includes('número') || t.includes('numero') || t.includes('contagem')) return 'count';
+  if (t.includes('média') || t.includes('media') || t.includes('average')) return 'avg';
   if (t.includes('soma') || t.includes('total') || t.includes('valor total')) return 'sum';
   if (t.includes('valores') || t.includes('listar') || t.includes('quais os valores') || t.includes('lista')) return 'list';
   // padrão por valores quando pergunta por "valores"
@@ -365,6 +366,34 @@ export async function tryNlqAnswer(queryText) {
 
   // Métrica padrão: se perguntar por "valores" ou não especificar, listar curtos
   const metricEff = metric || 'list';
+
+  if (metricEff === 'avg') {
+    const rows = await dbQuery(
+      `SELECT COALESCE(AVG(valor_total),0) AS media, COUNT(*)::int AS qtd
+       FROM MovimentoContas ${whereSql}`,
+      params
+    );
+    const r = rows[0] || { media: 0, qtd: 0 };
+    const tipo = movType === 'ENTRADA' ? 'de compra' : (movType === 'SAIDA' ? 'de venda' : '');
+    const periodo = period ? ` ${period.label}` : '';
+    const statusLbl = status ? ` ${lower(status)}` : '';
+    const whoPhrase = pessoa
+      ? (pessoaRel === 'fornecedor' ? `do fornecedor ${pessoa.nome}`
+        : (pessoaRel === 'cliente' ? `do cliente ${pessoa.nome}`
+        : `do faturado ${pessoa.nome}`))
+      : '';
+    const subject = `Média ${tipo}${whoPhrase ? ' ' + whoPhrase : ''}${periodo}${statusLbl}`;
+    const answer = `${subject}: ${formatCurrencyBRL(r.media)} (em ${r.qtd} notas).`.replace(/\s+/g, ' ').trim();
+    const srcMovs = await dbQuery(
+      `SELECT id, numero_documento FROM MovimentoContas ${whereSql} ORDER BY data_emissao DESC LIMIT 3`,
+      params
+    );
+    const sources = [
+      ...(pessoa ? [{ id: String(pessoa.id), title: pessoa.nome, type: 'Pessoas' }] : []),
+      ...srcMovs.map(m => ({ id: String(m.id), title: m.numero_documento, type: 'MovimentoContas' }))
+    ];
+    return { success: true, answer, sources };
+  }
 
   if (metricEff === 'count') {
     const rows = await dbQuery(

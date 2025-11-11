@@ -1,6 +1,6 @@
 import { getTextModel } from './geminiService.js';
 import { query as dbQuery } from './db.js';
-import { embedQueryAndSearch } from './embeddingStore.js';
+import { embedQueryAndSearch, getSchemaChunksBySimilarity } from './embeddingStore.js';
 import { tryNlqAnswer, detectEntity, lookupPessoaByEntity, detectMovementType } from './nlq.js';
 
 function toSource(row) {
@@ -167,6 +167,17 @@ async function tryNameOverviewAnswer(queryText) {
 }
 
 export async function ragSimple(query) {
+  // 0) Text-to-SQL com contexto de esquema (RAG Schema)
+  try {
+    const schemaChunks = await getSchemaChunksBySimilarity(query, { topK: 6 });
+    if (schemaChunks && schemaChunks.length) {
+      const gen = await generateSqlFromLLM(query, schemaChunks);
+      if (gen?.success && gen?.rows) return gen;
+    }
+  } catch (_) {
+    // segue para heurísticas
+  }
+
   // 1) Overview por nome: consulta curta sem métricas explícitas
   const overview = await tryNameOverviewAnswer(query);
   if (overview) return overview;
@@ -354,4 +365,161 @@ export async function getSourceDetails(type, id) {
     return { ...base, qtd_movimentos: agg.qtd_movimentos || 0, total_classificado: totalClassificadoNum, movimentos };
   }
   throw new Error(`Tipo de fonte não suportado: ${type}`);
+}
+
+// ======== Auxiliares Text-to-SQL simples ========
+
+function validateSqlSelectOnly(sql) {
+  const s = String(sql || '').trim();
+  if (!/^select\s/i.test(s)) return false; // deve começar com SELECT
+  const forbidden = /(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum)\s/i;
+  if (forbidden.test(s)) return false;
+  return true;
+}
+
+function sanitizeSqlSelect(sql) {
+  let s = String(sql || '').trim();
+  s = s.split(';')[0]; // manter só a primeira sentença
+  if (!/\blimit\b/i.test(s)) s = `${s} LIMIT 50`;
+  return s;
+}
+
+function extractSqlFromText(text) {
+  const t = String(text || '');
+  const fence = t.match(/```sql[\s\S]*?```/i) || t.match(/```[\s\S]*?```/);
+  if (fence) {
+    return fence[0].replace(/```sql/i, '').replace(/```/g, '').trim();
+  }
+  const marker = t.match(/SQL\s*:\s*([\s\S]+)/i);
+  if (marker) return marker[1].trim();
+  return t.trim();
+}
+
+async function generateSqlFromLLM(queryText, schemaChunks) {
+  const model = getTextModel();
+  const schemaText = schemaChunks.map(c => c.text).join('\n---\n');
+  const prompt = `Você é um gerador de SQL para PostgreSQL. Gere UMA única consulta SELECT válida com base na pergunta do usuário e no esquema fornecido. Não explique, apenas a consulta. Use nomes de tabelas e colunas exatamente como no esquema. Se necessário, inclua filtros simples e agregações.\n\nEsquema:\n${schemaText}\n\nPergunta do usuário:\n${queryText}\n\nResponda apenas com a consulta SQL.`;
+  const resp = await model.generateContent(prompt);
+  const raw = resp.response.text();
+  const sql = extractSqlFromText(raw);
+  if (!validateSqlSelectOnly(sql)) {
+    return { success: false, error: 'SQL inválido ou não-SELECT gerado.' };
+  }
+  const safeSql = sanitizeSqlSelect(sql);
+  try {
+    const rows = await dbQuery(safeSql);
+    if (!rows || rows.length === 0) {
+      const overview = await tryNameOverviewAnswer(queryText);
+      if (overview) return { ...overview, sql: safeSql };
+    }
+    const { answer, sources } = await buildAnswerAndSourcesFromRows(queryText, rows);
+    return { success: true, answer, sql: safeSql, rows, sources };
+  } catch (e) {
+    return { success: false, error: `Falha ao executar SQL: ${e.message}`, sql: safeSql };
+  }
+}
+
+function inferSourceType(row) {
+  const keys = Object.keys(row || {}).map(k => k.toLowerCase());
+  if (keys.includes('numero_documento') || keys.includes('valor_total') || keys.includes('tipo_movimento')) return 'MovimentoContas';
+  if (keys.includes('nome') || keys.includes('documento') || keys.includes('tipo_relacionamento')) return 'Pessoas';
+  if (keys.includes('categoria') || keys.includes('subcategoria') || keys.includes('tipo')) return 'Classificacao';
+  return undefined;
+}
+
+function pessoaPapel(pessoa) {
+  const tipoRel = (pessoa?.tipo_relacionamento || '').toUpperCase();
+  if (tipoRel.includes('FORNECEDOR') && tipoRel.includes('CLIENTE')) return 'fornecedor/cliente';
+  if (tipoRel.includes('FORNECEDOR')) return 'fornecedor';
+  if (tipoRel.includes('CLIENTE')) return 'cliente';
+  return 'fornecedor/cliente';
+}
+
+async function findClosestPessoa(queryText) {
+  const q = String(queryText || '').trim();
+  const entity = detectEntity(q);
+  let pessoa = null;
+  if (entity?.name) {
+    pessoa = await lookupPessoaByEntity(entity.type || 'fornecedor', entity.name);
+  }
+  if (!pessoa) pessoa = await lookupPessoaByEntity('fornecedor', q);
+  if (!pessoa) pessoa = await lookupPessoaByEntity('cliente', q);
+  if (!pessoa) pessoa = await lookupPessoaByEntity('faturado', q);
+  return pessoa;
+}
+
+async function buildAnswerAndSourcesFromRows(queryText, rows) {
+  const pessoa = await findClosestPessoa(queryText);
+  const qtd = Array.isArray(rows) ? rows.length : 0;
+  if (qtd === 0) {
+    const answer = pessoa
+      ? `Não encontrei registros diretamente relacionados ao ${pessoaPapel(pessoa)} ${pessoa.nome}.`
+      : `Não encontrei registros relacionados à sua consulta.`;
+    const sources = pessoa ? [{ id: String(pessoa.id), title: pessoa.nome, type: 'Pessoas' }] : [];
+    return { answer, sources };
+  }
+
+  const first = rows[0] || {};
+  const hasCount = first.count !== undefined || first.qtd !== undefined || first.total !== undefined;
+  const hasValor = first.valor_total !== undefined;
+  const hasEmissao = first.data_emissao !== undefined;
+  const pessoaInfo = pessoa ? `${pessoaPapel(pessoa)} ${pessoa.nome}` : null;
+
+  let answer = '';
+  if (hasCount) {
+    const total = Number(first.count ?? first.qtd ?? first.total ?? qtd);
+    answer = pessoaInfo
+      ? `Total de registros para ${pessoaInfo}: ${total}.`
+      : `Total de registros: ${total}.`;
+  } else if (hasValor) {
+    const soma = rows.reduce((acc, r) => acc + Number(r.valor_total || 0), 0);
+    const topVals = rows
+      .map(r => Number(r.valor_total || 0))
+      .sort((a, b) => b - a)
+      .slice(0, 3)
+      .map(formatCurrencyBRL);
+    let parteTop = '';
+    if (topVals.length === 1) parteTop = `Principal valor de ${topVals[0]}.`;
+    else if (topVals.length === 2) parteTop = `Principais valores de ${topVals[0]} e ${topVals[1]}.`;
+    else if (topVals.length === 3) parteTop = `Principais valores como ${topVals.join(', ')}.`;
+    let parteUlt = '';
+    if (hasEmissao) {
+      const datas = rows
+        .map(r => r.data_emissao ? new Date(r.data_emissao).getTime() : 0)
+        .filter(Boolean)
+        .sort((a, b) => b - a);
+      if (datas[0]) parteUlt = ` Última emissão em ${new Date(datas[0]).toLocaleDateString('pt-BR')}.`;
+    }
+    const sSoma = formatCurrencyBRL(soma);
+    const base = pessoaInfo
+      ? `O ${pessoaPapel(pessoa)} ${pessoa.nome} possui ${qtd} notas, total de ${sSoma}.`
+      : `Foram encontrados ${qtd} registros com total de ${sSoma}.`;
+    answer = (base + (parteUlt ? parteUlt : '') + (parteTop ? ` ${parteTop}` : '')).trim();
+  } else {
+    const exemplos = rows.slice(0, 3).map(r => {
+      const nome = r.nome ?? r.numero_documento ?? r.descricao ?? r.titulo ?? '';
+      const val = r.valor_total ? `, ${formatCurrencyBRL(r.valor_total)}` : '';
+      return `${nome}${val}`.trim();
+    }).filter(Boolean);
+    const exemplosTxt = exemplos.length ? ` Exemplos: ${exemplos.join('; ')}.` : '';
+    answer = pessoaInfo
+      ? `Encontrei ${qtd} registros relacionados a ${pessoaInfo}.${exemplosTxt}`
+      : `Encontrei ${qtd} registros relacionados.${exemplosTxt}`;
+  }
+
+  const sources = [];
+  if (pessoa) sources.push({ id: String(pessoa.id), title: pessoa.nome, type: 'Pessoas' });
+  // adicionar até 3 fontes dos resultados
+  for (const r of rows.slice(0, 5)) {
+    const type = inferSourceType(r);
+    if (!type) continue;
+    const id = r.id ?? r.movimento_id ?? r.pessoa_id ?? r.classificacao_id;
+    const title = r.numero_documento ?? r.nome ?? r.descricao ?? undefined;
+    if (id) {
+      const src = { id: String(id), title, type };
+      if (!sources.find(s => s.id === src.id && s.type === src.type)) sources.push(src);
+    }
+    if (sources.length >= 4) break;
+  }
+  return { answer, sources };
 }

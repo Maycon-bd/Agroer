@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { ragSimple, ragEmbeddingsSearch, getSourceDetails } from '../services/ragService.js';
-import { indexFromDb } from '../services/embeddingStore.js';
+import { indexFromDb, indexSchemaFromDb } from '../services/embeddingStore.js';
 
 const router = Router();
 
@@ -34,6 +34,7 @@ router.post('/embeddings/search', async (req, res) => {
 router.post('/embeddings/index', async (_req, res) => {
   try {
     await indexFromDb();
+    await indexSchemaFromDb();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Erro desconhecido' });
