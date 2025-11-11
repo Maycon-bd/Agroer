@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { env, hasAgente3 } from './config/env';
 import { ragSimple, ragEmbeddingsSearch } from './services/rag';
@@ -70,6 +70,9 @@ function App() {
   const [isCreatingMovement, setIsCreatingMovement] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Search state for RAG integrations
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
@@ -100,21 +103,26 @@ function App() {
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      setSelectedFile(file);
-      setExtractedData(null);
-    } else {
-      alert('Por favor, selecione apenas arquivos PDF.');
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+    if (!file) return;
+    if (file.type !== 'application/pdf' || file.size > MAX_SIZE) {
+      setError('Arquivo inválido. Selecione um PDF com menos de 10MB.');
       event.target.value = '';
+      return;
     }
+    setError(null);
+    setSelectedFile(file);
+    setExtractedData(null);
+    setAnalysisResult(null);
+    setSuccessMessage(null);
   };
 
   const handleExtractData = async () => {
     if (!selectedFile) {
-      alert('Por favor, selecione um arquivo PDF primeiro.');
+      setError('Por favor, selecione um arquivo PDF primeiro.');
       return;
     }
-
+  
     setIsProcessing(true);
     setError(null);
     setExtractedData(null);
@@ -123,17 +131,10 @@ function App() {
       const formData = new FormData();
       formData.append('file', selectedFile);
       
-      console.log('📤 Enviando arquivo para processamento...');
-      console.log('🔧 Debug - URL da requisição:', `${API_BASE_URL}/pdf/extract`);
-      console.log('🔧 Debug - Arquivo selecionado:', selectedFile.name, selectedFile.size, 'bytes');
-      
       const response = await fetch(`${API_BASE_URL}/pdf/extract`, {
         method: 'POST',
         body: formData,
       });
-      
-      console.log('🔧 Debug - Response status:', response.status, response.statusText);
-      console.log('🔧 Debug - Response headers:', Object.fromEntries(response.headers.entries()));
       
       const result = await response.json();
       
@@ -142,17 +143,14 @@ function App() {
       }
       
       if (result.success && result.data) {
-        console.log('✅ Dados extraídos com sucesso:', result.data);
         setExtractedData(result.data);
       } else {
         throw new Error('Resposta inválida do servidor');
       }
       
     } catch (err) {
-      console.error('❌ Erro no processamento:', err);
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
-      alert(`Erro ao processar arquivo: ${errorMessage}`);
     } finally {
       setIsProcessing(false);
     }
@@ -162,9 +160,22 @@ function App() {
     if (extractedData) {
       const jsonString = JSON.stringify(extractedData, null, 2);
       navigator.clipboard.writeText(jsonString).then(() => {
-        alert('JSON copiado para a área de transferência!');
+        setCopied(true);
+        setSuccessMessage('JSON copiado!');
+        setTimeout(() => setCopied(false), 1500);
       });
     }
+  };
+
+  const resetUpload = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    setSelectedFile(null);
+    setExtractedData(null);
+    setAnalysisResult(null);
+    setError(null);
+    setSuccessMessage(null);
   };
 
   // RAG search handlers (stub for future integration)
@@ -210,10 +221,10 @@ function App() {
 
   const handleAnalyzeData = async () => {
     if (!extractedData) {
-      alert('Nenhum dado extraído para analisar.');
+      setError('Nenhum dado extraído para analisar.');
       return;
     }
-
+  
     setIsAnalyzing(true);
     setError(null);
     setSuccessMessage(null);
@@ -230,9 +241,7 @@ function App() {
         dataEmissao: extractedData.dataEmissao || '',
         valorTotal: extractedData.valorTotal || 0
       };
-
-      console.log('📊 Enviando dados para análise...', dadosParaAnalise);
-      
+  
       const response = await fetch(`${VALIDATION_API_URL}/validation/analyze`, {
         method: 'POST',
         headers: {
@@ -244,21 +253,18 @@ function App() {
       const result = await response.json();
       
       if (!response.ok) {
-        throw new Error(result.error || 'Erro ao analisar dados');
+        throw new Error(result.error || result.message || 'Erro ao analisar dados');
       }
       
       if (result.success && result.analise) {
-        console.log('✅ Análise concluída:', result.analise);
         setAnalysisResult(result.analise);
       } else {
         throw new Error('Resposta inválida do servidor de análise');
       }
       
     } catch (err) {
-      console.error('❌ Erro na análise:', err);
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
-      alert(`Erro ao analisar dados: ${errorMessage}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -266,16 +272,15 @@ function App() {
 
   const handleCreateMovement = async () => {
     if (!extractedData || !analysisResult) {
-      alert('É necessário ter dados extraídos e análise concluída.');
+      setError('É necessário ter dados extraídos e análise concluída.');
       return;
     }
-
+  
     setIsCreatingMovement(true);
     setError(null);
     setSuccessMessage(null);
     
     try {
-      // Preparar dados para criação do movimento
       const dadosParaMovimento = {
         nomeFornecedor: extractedData.fornecedor?.razaoSocial || '',
         cnpjFornecedor: extractedData.fornecedor?.cnpj || '',
@@ -287,9 +292,7 @@ function App() {
         valorTotal: extractedData.valorTotal || 0,
         dataVencimento: extractedData.parcelas?.[0]?.dataVencimento || extractedData.dataEmissao
       };
-
-      console.log('💾 Criando movimento...', { dadosParaMovimento, analysisResult });
-      
+  
       const response = await fetch(`${VALIDATION_API_URL}/validation/create-movement`, {
         method: 'POST',
         headers: {
@@ -304,22 +307,18 @@ function App() {
       const result = await response.json();
       
       if (!response.ok) {
-        throw new Error(result.error || 'Erro ao criar movimento');
+        throw new Error(result.error || result.message || 'Erro ao criar movimento');
       }
       
       if (result.success) {
-        console.log('✅ Movimento criado:', result);
         setSuccessMessage(result.message);
-        alert(result.message);
       } else {
         throw new Error('Resposta inválida do servidor');
       }
       
     } catch (err) {
-      console.error('❌ Erro na criação do movimento:', err);
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
-      alert(`Erro ao criar movimento: ${errorMessage}`);
     } finally {
       setIsCreatingMovement(false);
     }
@@ -330,6 +329,7 @@ function App() {
       <div className="container">
         {/* Seção de Upload */}
         <div className="upload-section">
+          <a className="help-toggle" onClick={() => setShowHelp(v => !v)} aria-label="Ajuda">?</a>
           <h1 className="main-title">Agroer</h1>
           <p className="subtitle">
             Agroer — Carregue um PDF de nota fiscal e extraia os dados automaticamente usando IA
@@ -344,12 +344,19 @@ function App() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            <button type="submit" className="search-button">Pesquisar</button>
+            <button type="submit" className="search-button" disabled={isSearching}>
+              {isSearching ? 'Pesquisando...' : 'Pesquisar'}
+              {isSearching && <span className="status-spinner" aria-hidden="true" />}
+            </button>
           </form>
           {debouncedQuery && (
-            <div className="search-status">Consultando por: "{debouncedQuery}"</div>
+            <div className="search-status" aria-live="polite">Consultando por: "{debouncedQuery}"</div>
           )}
-          
+          {showHelp && (
+            <div className="help-box">
+              Como funciona: 1. Envie uma NF-e em PDF (até 10MB). 2. Clique em 'Extrair Dados' para a IA processar. 3. Clique em 'Analisar Dados' para validar no banco. 4. Clique em 'Criar Movimento' para salvar.
+            </div>
+          )}
           <div className="file-upload-area">
             <input
               type="file"
@@ -357,25 +364,37 @@ function App() {
               accept=".pdf"
               onChange={handleFileSelect}
               className="file-input"
+              ref={fileInputRef}
             />
-            <label htmlFor="file-input" className="file-label">
+            <label htmlFor="file-input" className="file-label" aria-label="Selecionar arquivo PDF">
               <div className="upload-icon">📄</div>
               <span>Clique para selecionar um arquivo PDF</span>
+              <small className="upload-hint">(Limite de 10MB, apenas arquivos .pdf)</small>
             </label>
           </div>
 
           {selectedFile && (
             <div className="selected-file">
               <span className="file-name">📎 {selectedFile.name}</span>
+              <button className="file-change-btn" onClick={resetUpload} aria-label="Trocar arquivo">Trocar arquivo</button>
             </div>
+          )}
+
+          {error && (
+            <div className="inline-error" role="alert">{error}</div>
+          )}
+          {successMessage && (
+            <div className="inline-success" role="status" aria-live="polite">{successMessage}</div>
           )}
 
           <button 
             onClick={handleExtractData} 
             disabled={!selectedFile || isProcessing}
             className="extract-button"
+            aria-live="polite"
           >
             {isProcessing ? 'PROCESSANDO...' : 'EXTRAIR DADOS'}
+            {isProcessing && <span className="status-spinner" aria-hidden="true" />}
           </button>
 
           {/* Painel de resultados da pesquisa (abaixo do botão extrair) */}
@@ -430,8 +449,10 @@ function App() {
                 onClick={handleAnalyzeData} 
                 disabled={isAnalyzing}
                 className="analyze-button"
+                aria-live="polite"
               >
                 {isAnalyzing ? 'ANALISANDO...' : 'ANALISAR DADOS'}
+                {isAnalyzing && <span className="status-spinner" aria-hidden="true" />}
               </button>
               
               {analysisResult && (
@@ -439,8 +460,10 @@ function App() {
                   onClick={handleCreateMovement} 
                   disabled={isCreatingMovement}
                   className="create-movement-button"
+                  aria-live="polite"
                 >
                   {isCreatingMovement ? 'CRIANDO MOVIMENTO...' : 'CRIAR MOVIMENTO'}
+                  {isCreatingMovement && <span className="status-spinner" aria-hidden="true" />}
                 </button>
               )}
             </div>
@@ -467,7 +490,7 @@ function App() {
 
         {/* Seção de Dados Extraídos */}
         {extractedData && (
-          <div className="extracted-data">
+          <div className="extracted-data" role="status" aria-live="polite">
             <div className="data-header">
               <h2>📄 Dados Extraídos</h2>
               <div className="view-controls">
@@ -604,7 +627,7 @@ function App() {
 
         {/* Seção de Resultados da Análise */}
         {analysisResult && (
-          <div className="analysis-result">
+          <div className="analysis-result" role="status" aria-live="polite">
             <h2>🔍 Resultados da Análise</h2>
             
             <div className="analysis-section">

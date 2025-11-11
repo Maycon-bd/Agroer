@@ -1,6 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const databaseService = require('../services/databaseService');
+
+// Seleção dinâmica do serviço de banco: usa mock em dev quando não há credenciais
+let databaseService;
+try {
+  const useMock = (process.env.USE_DB_MOCK === 'true') || (
+    process.env.NODE_ENV !== 'production' && (!process.env.DB_HOST || !process.env.DB_PASSWORD)
+  );
+  databaseService = useMock
+    ? require('../services/databaseService.mock')
+    : require('../services/databaseService');
+  console.log(`🔁 DatabaseService em uso: ${useMock ? 'MOCK' : 'REAL'}`);
+} catch (err) {
+  console.warn('⚠️ Falha ao carregar serviço de banco real, usando MOCK:', err?.message || err);
+  databaseService = require('../services/databaseService.mock');
+}
 
 // Rota para analisar dados extraídos
 router.post('/analyze', async (req, res) => {

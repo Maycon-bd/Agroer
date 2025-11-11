@@ -23,11 +23,119 @@ body {
 .container {
   width: 100%;
   min-height: 100vh;
-  margin: 0;
+  max-width: 900px; /* Nielsen: reduzir largura para foco e legibilidade */
+  margin: 0 auto;   /* centralizar conteúdo */
+  padding-bottom: 50px; /* evitar colar no rodapé */
   background-color: #f8f9fa;
   border-radius: 0;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   overflow: hidden;
+}
+
+/* Acessibilidade: foco visível */
+button:focus-visible,
+input:focus-visible,
+.file-label:focus-visible,
+.search-input:focus-visible {
+  outline: 2px solid #ffc107;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.35);
+}
+
+/* Spinner para estados de carregamento */
+.status-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-top-color: #fff;
+  border-radius: 50%;
+  margin-left: 8px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Mensagens inline de erro/sucesso na seção de upload */
+.inline-error {
+  margin: 16px auto 0 auto;
+  max-width: 600px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 53, 69, 0.6);
+  background: rgba(220, 53, 69, 0.18);
+  color: #fff;
+}
+
+.inline-success {
+  margin: 16px auto 0 auto;
+  max-width: 600px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(25, 135, 84, 0.6);
+  background: rgba(25, 135, 84, 0.18);
+  color: #fff;
+}
+
+/* Microcopy de upload */
+.upload-hint {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+/* Botão para trocar arquivo */
+.file-change-btn {
+  margin-left: 12px;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+
+.file-change-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Link de ajuda */
+.help-toggle {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  color: #212529;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  font-weight: 700;
+  z-index: 2;
+}
+
+.help-toggle:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.help-box {
+  margin: 16px auto 0 auto;
+  max-width: 720px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: #fff;
 }
 
 /* Seção de Upload */
@@ -36,6 +144,7 @@ body {
   text-align: center;
   background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
   color: white;
+  position: relative;
 }
 
 .main-title {
