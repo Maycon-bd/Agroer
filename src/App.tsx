@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
+import { env, hasAgente3 } from './config/env';
+import { ragSimple, ragEmbeddingsSearch } from './services/rag';
+import type { RagSimpleResponse, RagEmbeddingsResponse } from './services/rag';
 
 interface ExtractedData {
   fornecedor: {
@@ -67,16 +70,32 @@ function App() {
   const [isCreatingMovement, setIsCreatingMovement] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Search state for RAG integrations
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedQuery, setDebouncedQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchAnswer, setSearchAnswer] = useState<string | null>(null);
+  const [searchSources, setSearchSources] = useState<RagSimpleResponse['sources'] | null>(null);
+  const [searchEmbeddings, setSearchEmbeddings] = useState<RagEmbeddingsResponse['results'] | null>(null);
 
-  const API_BASE_URL = (import.meta as any)?.env?.VITE_AGENTE1_URL ? `${(import.meta as any).env.VITE_AGENTE1_URL}/api` : 'http://localhost:3001/api';
-  const VALIDATION_API_URL = (import.meta as any)?.env?.VITE_AGENTE2_URL ? `${(import.meta as any).env.VITE_AGENTE2_URL}/api` : 'http://localhost:3002/api';
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedQuery(searchQuery.trim());
+    }, 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+  const API_BASE_URL = env.agente1Api;
+  const VALIDATION_API_URL = env.agente2Api;
 
   // Debug logs
   console.log('🔧 Debug - Variáveis de ambiente:', {
     VITE_AGENTE1_URL: (import.meta as any)?.env?.VITE_AGENTE1_URL,
     VITE_AGENTE2_URL: (import.meta as any)?.env?.VITE_AGENTE2_URL,
+    VITE_AGENTE3_URL: (import.meta as any)?.env?.VITE_AGENTE3_URL,
     API_BASE_URL,
-    VALIDATION_API_URL
+    VALIDATION_API_URL,
+    AGENTE3_API: env.agente3Api,
   });
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,6 +165,47 @@ function App() {
         alert('JSON copiado para a área de transferência!');
       });
     }
+  };
+
+  // RAG search handlers (stub for future integration)
+  const performSearchRAG = async (query: string) => {
+    console.log('🔎 Consulta RAG:', query);
+    setIsSearching(true);
+    setSearchError(null);
+    setSearchAnswer(null);
+    setSearchSources(null);
+    setSearchEmbeddings(null);
+    try {
+      if (!hasAgente3) {
+        throw new Error('Agente3 não configurado. Defina VITE_AGENTE3_URL para habilitar RAG.');
+      }
+      // Primeiro tenta RAG simples
+      const simple = await ragSimple(query);
+      if (!simple.success) {
+        throw new Error(simple.error || 'Falha na consulta RAG simples.');
+      }
+      setSearchAnswer(simple.answer || null);
+      setSearchSources(simple.sources || null);
+      // Em seguida, consulta embeddings
+      const emb = await ragEmbeddingsSearch(query);
+      if (!emb.success) {
+        throw new Error(emb.error || 'Falha na busca de embeddings.');
+      }
+      setSearchEmbeddings(emb.results || null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Erro desconhecido na busca';
+      console.warn('Busca RAG erro:', msg);
+      setSearchError(msg);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (!q) return;
+    performSearchRAG(q);
   };
 
   const handleAnalyzeData = async () => {
@@ -270,10 +330,25 @@ function App() {
       <div className="container">
         {/* Seção de Upload */}
         <div className="upload-section">
-          <h1 className="main-title">Extração de Dados de Nota Fiscal</h1>
+          <h1 className="main-title">Agroer</h1>
           <p className="subtitle">
-            Carregue um PDF de nota fiscal e extraia os dados automaticamente usando IA
+            Agroer — Carregue um PDF de nota fiscal e extraia os dados automaticamente usando IA
           </p>
+          {/* Search bar for future RAG integrations */}
+          <form className="search-bar" onSubmit={handleSearchSubmit}>
+            <input
+              className="search-input"
+              type="search"
+              placeholder="Pesquisar notas, fornecedores, produtos..."
+              aria-label="Pesquisar"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <button type="submit" className="search-button">Pesquisar</button>
+          </form>
+          {debouncedQuery && (
+            <div className="search-status">Consultando por: "{debouncedQuery}"</div>
+          )}
           
           <div className="file-upload-area">
             <input
@@ -302,6 +377,51 @@ function App() {
           >
             {isProcessing ? 'PROCESSANDO...' : 'EXTRAIR DADOS'}
           </button>
+
+          {/* Painel de resultados da pesquisa (abaixo do botão extrair) */}
+          <div className="search-results">
+            <div className="search-header">
+              <h3>🔎 Resultados da Pesquisa</h3>
+              {isSearching && <span className="search-loading">Consultando...</span>}
+            </div>
+            {searchError && (
+              <div className="search-error">{searchError}</div>
+            )}
+            {!searchError && !searchAnswer && !searchEmbeddings && !isSearching && (
+              <p className="search-empty">Nenhum resultado. Use o campo de pesquisa acima.</p>
+            )}
+            {searchAnswer && (
+              <div className="search-answer">
+                <strong>Resposta:</strong>
+                <p>{searchAnswer}</p>
+              </div>
+            )}
+            {searchSources && searchSources.length > 0 && (
+              <div className="search-sources">
+                <strong>Fontes:</strong>
+                <div className="sources-list">
+                  {searchSources.map((s) => (
+                    <a key={s.id} className="source-item" href={s.url || '#'} target="_blank" rel="noopener noreferrer">
+                      {s.title || s.id} {s.score !== undefined ? `• score ${s.score.toFixed(2)}` : ''}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+            {searchEmbeddings && searchEmbeddings.length > 0 && (
+              <div className="search-embeddings">
+                <strong>Resultados por Similaridade:</strong>
+                <ul className="embeddings-list">
+                  {searchEmbeddings.map((r) => (
+                    <li key={r.id} className="embedding-item">
+                      <span className="embedding-score">{r.score.toFixed(3)}</span>
+                      <span className="embedding-text">{r.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
 
           {/* Novos botões para análise e validação */}
           {extractedData && (

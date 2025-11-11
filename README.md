@@ -1,56 +1,48 @@
 # AGROER - Analisador de Notas Fiscais
 
-Sistema web para upload e análise de notas fiscais em PDF, desenvolvido com React, TypeScript e integração com IA Gemini para extração automática de dados.
+Sistema web para upload e análise de notas fiscais em PDF, com integração de IA (Gemini) e preparado para consultas RAG via Agente3.
 
 ## Funcionalidades
-
 - Upload de arquivos PDF de notas fiscais
 - Extração automática de dados usando IA Gemini
-- Visualização dos dados extraídos em formato JSON
-- Interface responsiva e intuitiva
-- API backend para processamento de PDFs
+- Visualização dos dados extraídos em formato JSON e layout responsivo
+- Validação e criação de movimentos (Agente2)
+- Pesquisa com barra dedicada pronta para RAG (Agente3)
 
 ## Tecnologias
-
-- **Frontend**: React 18, TypeScript, Vite
+- **Frontend**: React, TypeScript, Vite
 - **Backend**: Node.js, Express
 - **IA**: Google Gemini API
-- **Processamento**: PDF-parse, Multer
 
-## Instalação
+## Instalação (Frontend)
+```bash
+npm install
+npm run dev
+```
+Acesse `http://localhost:5173/`.
 
-1. Clone o repositório
-2. Instale as dependências do frontend:
-   ```bash
-   npm install
-   ```
-3. Instale as dependências do backend:
-   ```bash
-   cd backend
-   npm install
-   ```
-4. Configure as variáveis de ambiente no backend (.env)
-5. Execute o backend:
-   ```bash
-   npm run dev
-   ```
-6. Execute o frontend:
-   ```bash
-   npm run dev
-   ```
+## Variáveis de Ambiente do Frontend
+- `VITE_AGENTE1_URL` (ex.: `http://localhost:3001`)
+- `VITE_AGENTE2_URL` (ex.: `http://localhost:3002`)
+- `VITE_AGENTE3_URL` (ex.: `http://localhost:3003`) — habilita a pesquisa RAG
+
+Se `VITE_AGENTE3_URL` não estiver definido, o frontend mantém a barra de pesquisa, mas alerta que o Agente3 não está configurado.
+
+## Agente3 (RAG)
+O frontend já possui:
+- `src/config/env.ts`: leitura centralizada das variáveis `VITE_*`
+- `src/services/rag.ts`: métodos `ragSimple(query)` e `ragEmbeddingsSearch(query)`
+- Integração na `App.tsx`: barra de pesquisa chama o serviço e exibe alertas/resultados
+
+Endpoints esperados (exemplo):
+- `POST /api/rag/simple` { query }
+- `POST /api/rag/embeddings/search` { query }
+
+## Docker
+O projeto possui `docker-compose.yml` para frontend, Agente1 e Agente2. Para incluir o Agente3, adicione um serviço `agente3` expondo a porta (ex.: `3003`) e injete `VITE_AGENTE3_URL` no serviço `frontend`.
 
 ## Uso
-
-1. Acesse a aplicação em `http://localhost:5173/`
-2. Faça upload de um arquivo PDF de nota fiscal
-3. Clique em "EXTRAIR DADOS" para processar
-4. Visualize os dados extraídos em formato JSON
-
-## Estrutura do Projeto
-
-- `/src` - Código fonte do frontend React
-- `/backend` - API Node.js para processamento de PDFs
-- `/backend/src/services` - Serviços de processamento e IA
-- `/backend/src/routes` - Rotas da API
-
-Este projeto faz parte de um sistema de gestão financeira para o agronegócio.
+1. Faça upload de um PDF
+2. Extraia dados
+3. Use a barra de pesquisa para testar a integração RAG
+4. Valide e crie movimentos quando disponível
