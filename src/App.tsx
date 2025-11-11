@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { env, hasAgente3 } from './config/env';
-import { ragSimple, ragEmbeddingsSearch } from './services/rag';
+import { ragSimple, ragEmbeddingsSearch, ragSourceDetails } from './services/rag';
 import type { RagSimpleResponse, RagEmbeddingsResponse } from './services/rag';
 
 interface ExtractedData {
@@ -81,6 +81,93 @@ function App() {
   const [searchAnswer, setSearchAnswer] = useState<string | null>(null);
   const [searchSources, setSearchSources] = useState<RagSimpleResponse['sources'] | null>(null);
   const [searchEmbeddings, setSearchEmbeddings] = useState<RagEmbeddingsResponse['results'] | null>(null);
+  const [selectedSource, setSelectedSource] = useState<{ id: string; type?: string; title?: string } | null>(null);
+  const [sourceDetails, setSourceDetails] = useState<Record<string, unknown> | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
+
+  const formatValue = (v: unknown) => {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    try { return JSON.stringify(v); } catch { return String(v); }
+  };
+
+  const formatCurrency = (v: unknown) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return formatValue(v);
+    try {
+      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
+    } catch {
+      return String(n);
+    }
+  };
+
+  const formatDate = (v: unknown) => {
+    if (!v) return '—';
+    const s = String(v);
+    // Esperado YYYY-MM-DD; manter simples para legibilidade
+    return s;
+  };
+
+  const formatSourceDetailsText = (type?: string, details?: Record<string, unknown> | null): string => {
+    if (!details) return '';
+    const d: any = details;
+    if (type === 'Pessoas') {
+      const notas: any[] = Array.isArray(d.notas) ? d.notas : [];
+      const linhasNotas = notas.map((n) => (
+        `- Doc: ${formatValue(n.numero_documento)} • Emissão: ${formatDate(n.data_emissao)} • Valor: ${formatCurrency(n.valor_total)} • Tipo: ${formatValue(n.tipo_movimento)}`
+      ));
+      return [
+        `ID: ${formatValue(d.id)}`,
+        `Nome: ${formatValue(d.nome)}`,
+        `CPF/CNPJ: ${formatValue(d.documento)}`,
+        `Tipo de Relacionamento: ${formatValue(d.tipo_relacionamento)}`,
+        `Endereço: ${formatValue(d.endereco)}`,
+        `Qtd de Notas: ${formatValue(d.qtd_notas)}`,
+        `Total em Notas: ${formatCurrency(d.total_notas)}`,
+        ...(linhasNotas.length ? ['Notas:', ...linhasNotas] : []),
+      ].join('\n');
+    }
+    if (type === 'MovimentoContas') {
+      const parcelas: any[] = Array.isArray(d.parcelas) ? d.parcelas : [];
+      const linhasParcelas = parcelas.map((p) => (
+        `- Parcela ${formatValue(p.numero_parcela)} • Venc.: ${formatDate(p.data_vencimento)} • Valor: ${formatCurrency(p.valor_parcela)} • Status: ${formatValue(p.status_parcela)}`
+      ));
+      return [
+        `ID: ${formatValue(d.id)}`,
+        `Número do Documento: ${formatValue(d.numero_documento)}`,
+        `Emissão: ${formatDate(d.data_emissao)}`,
+        `Tipo de Movimento: ${formatValue(d.tipo_movimento)}`,
+        `Descrição: ${formatValue(d.descricao)}`,
+        `Valor Total: ${formatCurrency(d.valor_total)}`,
+        d.fornecedor ? `Fornecedor: ${formatValue(d.fornecedor?.nome)} (${formatValue(d.fornecedor?.documento)})` : undefined,
+        d.faturado ? `Faturado: ${formatValue(d.faturado?.nome)} (${formatValue(d.faturado?.documento)})` : undefined,
+        `Qtd de Parcelas: ${formatValue(d.qtd_parcelas)}`,
+        `Total Parcelado: ${formatCurrency(d.total_parcelado)}`,
+        ...(linhasParcelas.length ? ['Parcelas:', ...linhasParcelas] : []),
+      ].filter(Boolean).join('\n');
+    }
+    if (type === 'Classificacao') {
+      const movimentos: any[] = Array.isArray(d.movimentos) ? d.movimentos : [];
+      const linhasMovs = movimentos.map((m) => (
+        `- Doc: ${formatValue(m.numero_documento)} • Emissão: ${formatDate(m.data_emissao)} • Valor: ${formatCurrency(m.valor_total)} • Tipo: ${formatValue(m.tipo_movimento)}`
+      ));
+      return [
+        `ID: ${formatValue(d.id)}`,
+        `Descrição: ${formatValue(d.descricao)}`,
+        `Tipo: ${formatValue(d.tipo)}`,
+        `Categoria: ${formatValue(d.categoria)}`,
+        `Subcategoria: ${formatValue(d.subcategoria)}`,
+        `Qtd de Movimentos: ${formatValue(d.qtd_movimentos)}`,
+        `Total Classificado: ${formatCurrency(d.total_classificado)}`,
+        ...(linhasMovs.length ? ['Movimentos:', ...linhasMovs] : []),
+      ].join('\n');
+    }
+    // Fallback genérico
+    return Object.entries(details)
+      .map(([k, v]) => `${k}: ${formatValue(v)}`)
+      .join('\n');
+  };
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -187,9 +274,7 @@ function App() {
     setSearchSources(null);
     setSearchEmbeddings(null);
     try {
-      if (!hasAgente3) {
-        throw new Error('Agente3 não configurado. Defina VITE_AGENTE3_URL para habilitar RAG.');
-      }
+      // Em dev, chamamos direto 3004; em prod usamos env. Não bloquear a UI.
       // Primeiro tenta RAG simples
       const simple = await ragSimple(query);
       if (!simple.success) {
@@ -217,6 +302,25 @@ function App() {
     const q = searchQuery.trim();
     if (!q) return;
     performSearchRAG(q);
+  };
+
+  const handleSourceClick = async (src: { id: string; type?: string; title?: string }) => {
+    setSelectedSource(src);
+    setSourceDetails(null);
+    if (!src.type) return; // sem tipo, não há detalhes
+    setIsLoadingDetails(true);
+    try {
+      const res = await ragSourceDetails(src.type, src.id);
+      if (res.success) {
+        setSourceDetails(res.details || null);
+      } else {
+        setSourceDetails({ erro: res.error || 'Falha ao obter detalhes.' });
+      }
+    } catch (err) {
+      setSourceDetails({ erro: err instanceof Error ? err.message : 'Erro desconhecido' });
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
   const handleAnalyzeData = async () => {
@@ -419,10 +523,17 @@ function App() {
               <div className="search-sources">
                 <strong>Fontes:</strong>
                 <div className="sources-list">
-                  {searchSources.map((s) => (
-                    <a key={s.id} className="source-item" href={s.url || '#'} target="_blank" rel="noopener noreferrer">
+                  {searchSources.map((s, i) => (
+                    <button
+                      key={`${s.type || 'src'}-${String(s.id)}-${i}`}
+                      type="button"
+                      className="source-item"
+                      onClick={() => handleSourceClick({ id: s.id, type: s.type, title: s.title })}
+                      title={s.type ? `Abrir detalhes (${s.type} #${s.id})` : 'Abrir detalhes'}
+                    >
                       {s.title || s.id} {s.score !== undefined ? `• score ${s.score.toFixed(2)}` : ''}
-                    </a>
+                      {s.type ? ` • ${s.type}` : ''}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -431,16 +542,63 @@ function App() {
               <div className="search-embeddings">
                 <strong>Resultados por Similaridade:</strong>
                 <ul className="embeddings-list">
-                  {searchEmbeddings.map((r) => (
-                    <li key={r.id} className="embedding-item">
+                  {searchEmbeddings.map((r, i) => (
+                    <li key={`${String(r.id)}-${i}`} className="embedding-item">
                       <span className="embedding-score">{r.score.toFixed(3)}</span>
                       <span className="embedding-text">{r.text}</span>
+                      {/* Botão de detalhamento por item usando metadados ref_type/ref_id */}
+                      {r.metadata && (r as any).metadata?.ref_type && (r as any).metadata?.ref_id && (
+                        <button
+                          type="button"
+                          className="embedding-detail-btn"
+                          title={`Detalhar ${(r as any).metadata?.ref_type} #${(r as any).metadata?.ref_id}`}
+                          aria-label="Detalhar"
+                          onClick={() => {
+                            const t = (r as any).metadata?.ref_type as string;
+                            const rid = (r as any).metadata?.ref_id as string | number;
+                            if (t && rid !== undefined) {
+                              handleSourceClick({ id: String(rid), type: t, title: r.text });
+                            }
+                          }}
+                        >
+                          Detalhar
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
           </div>
+
+          {/* Detalhes da Fonte Selecionada */}
+          {selectedSource && (
+            <div className="source-details-panel">
+              <div className="panel-header">
+                <h4>🔗 Detalhes da Fonte</h4>
+                <button className="close-btn" onClick={() => { setSelectedSource(null); setSourceDetails(null); }}>✖</button>
+              </div>
+              <div className="panel-body">
+                <div className="panel-meta">
+                  <span><strong>ID:</strong> {selectedSource.id}</span>
+                  {selectedSource.type && <span> • <strong>Tipo:</strong> {selectedSource.type}</span>}
+                  {selectedSource.title && <span> • <strong>Título:</strong> {selectedSource.title}</span>}
+                </div>
+                {isLoadingDetails && <div className="loading-inline">Carregando detalhes...</div>}
+                {!isLoadingDetails && sourceDetails && (
+                  <pre className="plain-data small">
+                    {formatSourceDetailsText(selectedSource.type, sourceDetails)}
+                  </pre>
+                )}
+                {!isLoadingDetails && !sourceDetails && selectedSource.type && (
+                  <div className="inline-hint">Nenhum detalhe encontrado.</div>
+                )}
+                {!selectedSource.type && (
+                  <div className="inline-hint">Tipo de fonte não disponível para detalhes.</div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Novos botões para análise e validação */}
           {extractedData && (

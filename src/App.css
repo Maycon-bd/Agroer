@@ -895,7 +895,7 @@ input:focus-visible,
 .embedding-item {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.2);
   padding: 10px;
@@ -905,7 +905,36 @@ input:focus-visible,
 
 .embedding-score {
   font-weight: 700;
+  min-width: 56px; /* manter alinhamento horizontal consistente */
 }
+
+.embedding-text {
+  flex: 1; /* empurra o botão para a direita mantendo alinhamento */
+}
+
+.embedding-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dee2e6; /* contraste de borda claro */
+  border-radius: 6px;
+  background: #f8f9fa;       /* fundo claro para destacar o texto */
+  color: #212529;            /* texto escuro para alto contraste */
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease, border-color 0.2s ease;
+  margin-left: auto;         /* garante alinhamento à direita */
+}
+
+.embedding-detail-btn:hover {
+  background: #e9ecef;
+  border-color: #adb5bd;
+  transform: translateY(-1px);
+}
+
+/* removido estilo de svg pois botão agora é texto */
 
 @media (max-width: 768px) {
   .search-results {

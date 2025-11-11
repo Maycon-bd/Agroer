@@ -109,12 +109,43 @@ services:
       - NODE_ENV=development
       - VITE_AGENTE1_URL=http://localhost:3001
       - VITE_AGENTE2_URL=http://localhost:3002
+      - VITE_AGENTE3_URL=http://localhost:3003
     networks:
       - agroer_network
     depends_on:
       - agente1
       - agente2
     restart: unless-stopped
+
+  # Agente3 - RAG (Consultas com IA)
+  agente3:
+    build:
+      context: ./agente3
+      dockerfile: Dockerfile
+    container_name: agroer_agente3
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - FRONTEND_URL=http://frontend:5173
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=Agroer
+      - DB_USER=postgres
+      - DB_PASSWORD=admin
+      - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY}
+    networks:
+      - agroer_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres_data:
