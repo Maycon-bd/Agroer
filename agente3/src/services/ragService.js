@@ -122,6 +122,11 @@ async function tryNameOverviewAnswer(queryText) {
   if (!pessoa) pessoa = await lookupPessoaByEntity('cliente', nameCandidate);
   if (!pessoa) pessoa = await lookupPessoaByEntity('faturado', nameCandidate);
   if (!pessoa) return null;
+  const strip = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const cand = strip(nameCandidate);
+  const nm = strip(pessoa.nome || '');
+  // Se o nome da pessoa não contiver o termo buscado (normalizado), evitar overview incorreto
+  if (!(nm.includes(cand) || cand === strip(pessoa.documento || ''))) return null;
 
   // Agregados gerais da Pessoa
   const aggRows = await dbQuery(
@@ -167,101 +172,53 @@ async function tryNameOverviewAnswer(queryText) {
 }
 
 export async function ragSimple(query) {
-  // 0) Text-to-SQL com contexto de esquema (RAG Schema)
-  try {
-    const schemaChunks = await getSchemaChunksBySimilarity(query, { topK: 6 });
-    if (schemaChunks && schemaChunks.length) {
-      const gen = await generateSqlFromLLM(query, schemaChunks);
-      if (gen?.success && gen?.rows) return gen;
-    }
-  } catch (_) {
-    // segue para heurísticas
-  }
-
-  // 1) Overview por nome: consulta curta sem métricas explícitas
   const overview = await tryNameOverviewAnswer(query);
   if (overview) return overview;
-
-  // 2) NLQ simples: tentar responder diretamente via SQL com padrões gerais
   const nlq = await tryNlqAnswer(query);
   if (nlq) return nlq;
-
-  // 3) Padrão anterior específico (legacy)
   const direct = await tryDirectAnswer(query);
   if (direct) return direct;
-
-  // 3) Contexto LLM: ancorar no fornecedor/cliente mais próximo, se detectado
-  const likeParam = `%${query}%`;
-  const resultados = [];
-
-  const entity = detectEntity(query);
-  let focoPessoa = null;
-  if (entity.type && entity.name && entity.name.length >= 2) {
-    focoPessoa = await lookupPessoaByEntity(entity.type, entity.name);
+  const byQuotes = String(query || '').match(/"([^\"]+)"/);
+  const nameCandidate = (byQuotes && byQuotes[1]) ? byQuotes[1].trim() : null;
+  if (nameCandidate && nameCandidate.length >= 2) {
+    const pessoa = await lookupPessoaAny(nameCandidate);
+    if (pessoa) {
+      const aggRows = await dbQuery(
+        `SELECT COUNT(*)::int AS qtd, COALESCE(SUM(valor_total), 0) AS soma, MAX(data_emissao) AS ultima
+         FROM MovimentoContas
+         WHERE fornecedor_id = $1 OR faturado_id = $1`,
+        [pessoa.id]
+      );
+      const agg = aggRows[0] || { qtd: 0, soma: 0, ultima: null };
+      const topRows = await dbQuery(
+        `SELECT id, numero_documento, valor_total
+         FROM MovimentoContas
+         WHERE fornecedor_id = $1 OR faturado_id = $1
+         ORDER BY valor_total DESC NULLS LAST, data_emissao DESC
+         LIMIT 3`,
+        [pessoa.id]
+      );
+      const notasTerm = agg.qtd === 1 ? 'nota' : 'notas';
+      const valoresList = topRows.map(r => formatCurrencyBRL(r.valor_total));
+      let valoresInfo = '';
+      if (valoresList.length === 1) valoresInfo = `Principal valor de ${valoresList[0]}.`;
+      else if (valoresList.length === 2) valoresInfo = `Principais valores de ${valoresList[0]} e ${valoresList[1]}.`;
+      else if (valoresList.length >= 3) valoresInfo = `Principais valores como ${valoresList.slice(0, 3).join(', ')}.`;
+      const ultima = agg.ultima ? new Date(agg.ultima).toLocaleDateString('pt-BR') : null;
+      const tipoRel = (pessoa.tipo_relacionamento || '').toUpperCase();
+      const papel = tipoRel.includes('FORNECEDOR') && tipoRel.includes('CLIENTE') ? 'fornecedor/cliente'
+        : (tipoRel.includes('FORNECEDOR') ? 'fornecedor' : (tipoRel.includes('CLIENTE') ? 'cliente' : 'fornecedor/cliente'));
+      const parte1 = `O ${papel} ${pessoa.nome} possui ${agg.qtd} ${notasTerm}, total de ${formatCurrencyBRL(agg.soma)}.`;
+      const parte2 = `${ultima ? ` Última emissão em ${ultima}.` : ''}${valoresInfo ? ` ${valoresInfo}` : ''}`;
+      const answer = (parte1 + parte2).replace(/\s+/g, ' ').trim();
+      const sources = [
+        { id: String(pessoa.id), title: pessoa.nome, type: 'Pessoas' },
+        ...topRows.map(r => ({ id: String(r.id), title: r.numero_documento, type: 'MovimentoContas' })),
+      ];
+      return { success: true, answer, sources };
+    }
   }
-
-  if (focoPessoa) {
-    resultados.push({ id: focoPessoa.id, titulo: focoPessoa.nome, texto: focoPessoa.documento, origem: 'Pessoas' });
-    const movType = detectMovementType(query);
-    const whereRel = entity.type === 'fornecedor' ? 'fornecedor_id = $1' : 'faturado_id = $1';
-    const params = [focoPessoa.id];
-    const movWhere = movType ? `${whereRel} AND tipo_movimento = $2` : whereRel;
-    if (movType) params.push(movType);
-    const movs = await dbQuery(
-      `SELECT id, numero_documento AS titulo, descricao AS texto, valor_total, tipo_movimento
-       FROM MovimentoContas WHERE ${movWhere}
-       ORDER BY data_emissao DESC LIMIT 6`,
-      params
-    );
-    resultados.push(...movs.map(r => ({ ...r, origem: 'MovimentoContas' })));
-  }
-  
-  // Complemento genérico
-  const pessoas = await dbQuery(
-    `SELECT id, nome AS titulo, documento, tipo_relacionamento AS rel, endereco AS texto
-     FROM Pessoas WHERE nome ILIKE $1 OR documento ILIKE $1`,
-    [likeParam]
-  );
-  resultados.push(...pessoas.map(r => ({ ...r, origem: 'Pessoas' })));
-
-  const movimentos = await dbQuery(
-    `SELECT id, numero_documento AS titulo, descricao AS texto, valor_total, tipo_movimento
-     FROM MovimentoContas WHERE numero_documento ILIKE $1 OR descricao ILIKE $1`,
-    [likeParam]
-  );
-  resultados.push(...movimentos.map(r => ({ ...r, origem: 'MovimentoContas' })));
-
-  const classificacoes = await dbQuery(
-    `SELECT id, descricao AS titulo, categoria, subcategoria
-     FROM Classificacao WHERE descricao ILIKE $1 OR categoria ILIKE $1 OR subcategoria ILIKE $1`,
-    [likeParam]
-  );
-  resultados.push(...classificacoes.map(r => ({ ...r, origem: 'Classificacao' })));
-
-  const context = resultados.slice(0, 12).map((r, idx) => {
-    return `[#${idx + 1}] Origem=${r.origem} | id=${r.id} | titulo=${r.titulo ?? ''} | texto=${r.texto ?? ''}`;
-  }).join('\n');
-
-  const systemPrompt = `Você é um assistente especializado em consultas financeiras agrícolas.
-Responda em português de forma clara e direta, com NO MÁXIMO 2 frases.
-Cite IDs quando útil. Use somente o contexto abaixo, não invente dados.
-Se a pergunta for curta ou ambígua, peça esclarecimento em 1 frase e dê até 2 exemplos concisos.`;
-
-  const focoLine = focoPessoa ? `Fornecedor/Cliente foco: ${focoPessoa.nome} (id=${focoPessoa.id})` : '';
-  const userPrompt = `Pergunta: ${query}\n${focoLine ? focoLine + '\n' : ''}\nContexto:\n${context}`;
-
-  const model = getTextModel();
-  const result = await model.generateContent([{ text: systemPrompt }, { text: userPrompt }]);
-  const text = result.response.text();
-
-  // Priorizamos fontes: pessoa foco e 3 notas principais
-  const prioritized = [];
-  if (focoPessoa) prioritized.push({ id: focoPessoa.id, titulo: focoPessoa.nome, origem: 'Pessoas' });
-  const movFoco = resultados.filter(r => r.origem === 'MovimentoContas').slice(0, 3);
-  prioritized.push(...movFoco);
-  const extras = resultados.filter(r => !(prioritized.find(p => p.id === r.id && p.origem === r.origem))).slice(0, 8);
-  const finalSources = [...prioritized, ...extras].map(toSource);
-  return { success: true, answer: text, sources: finalSources };
+  return { success: true, answer: 'Não encontrei registros relacionados à sua consulta.', sources: [] };
 }
 
 export async function ragEmbeddingsSearch(query) {

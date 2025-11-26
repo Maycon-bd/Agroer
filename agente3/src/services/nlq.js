@@ -129,12 +129,12 @@ function similarityScore(a, b) {
   const B = stripAccents(b);
   if (!A || !B) return 0;
   if (A === B) return 1;
-  if (B.startsWith(A)) return 0.95;
-  if (B.includes(A)) return 0.9;
+  if (B.startsWith(A)) return 0.9;
+  if (B.includes(A)) return 0.8;
   const at = A.split(/\s+/).filter(Boolean);
   const bt = new Set(B.split(/\s+/).filter(Boolean));
   const overlap = at.filter(t => bt.has(t)).length / Math.max(1, at.length);
-  return Math.max(0.6 * overlap, 0);
+  return Math.max(0.5 * overlap, 0);
 }
 
 export async function lookupPessoaByEntity(entityType, nameLike) {
@@ -151,15 +151,20 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
      ORDER BY nome ASC LIMIT 10`,
     [likeParam]
   );
+  const target = stripAccents(nameLike);
   if (rows.length) {
+    for (const r of rows) {
+      const nm = stripAccents(r.nome || '');
+      const dc = stripAccents(r.documento || '');
+      if (nm === target || dc === target) return r;
+    }
     let best = rows[0];
     let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
     for (const r of rows) {
       const sc = similarityScore(nameLike, r.nome || r.documento || '');
       if (sc > bestScore) { best = r; bestScore = sc; }
     }
-    // limiar mínimo simples
-    if (bestScore >= 0.3) return best;
+    if (bestScore >= 0.5) return best;
   }
   // Tentativa com tokens ampliados (nomes com variações: Ltda, Indústria, etc.)
   const tokens = stripAccents(nameLike).split(/\s+/).filter(t => t.length >= 2);
@@ -174,13 +179,18 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
       params
     );
     if (toks.length) {
+      for (const r of toks) {
+        const nm = stripAccents(r.nome || '');
+        const dc = stripAccents(r.documento || '');
+        if (nm === target || dc === target) return r;
+      }
       let best = toks[0];
       let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
       for (const r of toks) {
         const sc = similarityScore(nameLike, r.nome || r.documento || '');
         if (sc > bestScore) { best = r; bestScore = sc; }
       }
-      if (bestScore >= 0.3) return best;
+      if (bestScore >= 0.5) return best;
     }
   }
   // Fallback: procurar pelo relacionamento em MovimentoContas com join
@@ -196,13 +206,18 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
       [likeParam]
     );
     if (jrows.length) {
+      for (const r of jrows) {
+        const nm = stripAccents(r.nome || '');
+        const dc = stripAccents(r.documento || '');
+        if (nm === target || dc === target) return r;
+      }
       let best = jrows[0];
       let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
       for (const r of jrows) {
         const sc = similarityScore(nameLike, r.nome || r.documento || '');
         if (sc > bestScore) { best = r; bestScore = sc; }
       }
-      if (bestScore >= 0.3) return best;
+      if (bestScore >= 0.5) return best;
     }
     if (tokens.length) {
       const likes = tokens.map(t => `%${t}%`);
@@ -218,33 +233,44 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
         likes
       );
       if (jtok.length) {
+        for (const r of jtok) {
+          const nm = stripAccents(r.nome || '');
+          const dc = stripAccents(r.documento || '');
+          if (nm === target || dc === target) return r;
+        }
         let best = jtok[0];
         let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
         for (const r of jtok) {
           const sc = similarityScore(nameLike, r.nome || r.documento || '');
           if (sc > bestScore) { best = r; bestScore = sc; }
         }
-        if (bestScore >= 0.3) return best;
+        if (bestScore >= 0.5) return best;
       }
     }
-    // Fallback final: escolher melhor candidato entre os mais frequentes
-    const jall = await dbQuery(
-      `SELECT p.id, p.nome, p.documento, COUNT(m.id) as qtd
-       FROM MovimentoContas m
-       JOIN Pessoas p ON m.fornecedor_id = p.id
-       GROUP BY p.id
-       ORDER BY qtd DESC
-       LIMIT 100`
-    );
-    if (jall.length) {
-      let best = jall[0];
-      let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
-      for (const r of jall) {
-        const sc = similarityScore(nameLike, r.nome || r.documento || '');
-        if (sc > bestScore) { best = r; bestScore = sc; }
-      }
-      return best;
+  // Fallback final: escolher melhor candidato entre os mais frequentes
+  const jall = await dbQuery(
+    `SELECT p.id, p.nome, p.documento, COUNT(m.id) as qtd
+     FROM MovimentoContas m
+     JOIN Pessoas p ON m.fornecedor_id = p.id
+     GROUP BY p.id
+     ORDER BY qtd DESC
+     LIMIT 100`
+  );
+  if (jall.length) {
+    const target = stripAccents(nameLike);
+    for (const r of jall) {
+      const nm = stripAccents(r.nome || '');
+      const dc = stripAccents(r.documento || '');
+      if (nm === target || dc === target) return r;
     }
+    let best = jall[0];
+    let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
+    for (const r of jall) {
+      const sc = similarityScore(nameLike, r.nome || r.documento || '');
+      if (sc > bestScore) { best = r; bestScore = sc; }
+    }
+    if (bestScore >= 0.5) return best;
+  }
   } else {
     const jrows = await dbQuery(
       `SELECT p.id, p.nome, p.documento, COUNT(m.id) as qtd
@@ -257,13 +283,18 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
       [likeParam]
     );
     if (jrows.length) {
+      for (const r of jrows) {
+        const nm = stripAccents(r.nome || '');
+        const dc = stripAccents(r.documento || '');
+        if (nm === target || dc === target) return r;
+      }
       let best = jrows[0];
       let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
       for (const r of jrows) {
         const sc = similarityScore(nameLike, r.nome || r.documento || '');
         if (sc > bestScore) { best = r; bestScore = sc; }
       }
-      if (bestScore >= 0.3) return best;
+      if (bestScore >= 0.5) return best;
     }
     if (tokens.length) {
       const likes = tokens.map(t => `%${t}%`);
@@ -279,34 +310,68 @@ export async function lookupPessoaByEntity(entityType, nameLike) {
         likes
       );
       if (jtok.length) {
+        for (const r of jtok) {
+          const nm = stripAccents(r.nome || '');
+          const dc = stripAccents(r.documento || '');
+          if (nm === target || dc === target) return r;
+        }
         let best = jtok[0];
         let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
         for (const r of jtok) {
           const sc = similarityScore(nameLike, r.nome || r.documento || '');
           if (sc > bestScore) { best = r; bestScore = sc; }
         }
-        if (bestScore >= 0.3) return best;
+        if (bestScore >= 0.5) return best;
       }
     }
-    const jall = await dbQuery(
-      `SELECT p.id, p.nome, p.documento, COUNT(m.id) as qtd
-       FROM MovimentoContas m
-       JOIN Pessoas p ON m.faturado_id = p.id
-       GROUP BY p.id
-       ORDER BY qtd DESC
-       LIMIT 100`
-    );
-    if (jall.length) {
-      let best = jall[0];
-      let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
-      for (const r of jall) {
-        const sc = similarityScore(nameLike, r.nome || r.documento || '');
-        if (sc > bestScore) { best = r; bestScore = sc; }
-      }
-      return best;
+  const jall = await dbQuery(
+    `SELECT p.id, p.nome, p.documento, COUNT(m.id) as qtd
+     FROM MovimentoContas m
+     JOIN Pessoas p ON m.faturado_id = p.id
+     GROUP BY p.id
+     ORDER BY qtd DESC
+     LIMIT 100`
+  );
+  if (jall.length) {
+    const target = stripAccents(nameLike);
+    for (const r of jall) {
+      const nm = stripAccents(r.nome || '');
+      const dc = stripAccents(r.documento || '');
+      if (nm === target || dc === target) return r;
     }
+    let best = jall[0];
+    let bestScore = similarityScore(nameLike, best.nome || best.documento || '');
+    for (const r of jall) {
+      const sc = similarityScore(nameLike, r.nome || r.documento || '');
+      if (sc > bestScore) { best = r; bestScore = sc; }
+    }
+    if (bestScore >= 0.5) return best;
+  }
   }
   return null;
+}
+
+export async function lookupPessoaAny(nameLike) {
+  const likeParam = `%${nameLike}%`;
+  const rows = await dbQuery(
+    `SELECT id, nome, documento, tipo_relacionamento FROM Pessoas
+     WHERE nome ILIKE $1 OR documento ILIKE $1
+     ORDER BY nome ASC LIMIT 20`,
+    [likeParam]
+  );
+  const target = stripAccents(nameLike);
+  for (const r of rows) {
+    const nm = stripAccents(r.nome || '');
+    const dc = stripAccents(r.documento || '');
+    if (nm === target || dc === target) return r;
+  }
+  let best = rows[0] || null;
+  let bestScore = best ? similarityScore(nameLike, best.nome || best.documento || '') : 0;
+  for (const r of rows) {
+    const sc = similarityScore(nameLike, r.nome || r.documento || '');
+    if (sc > bestScore) { best = r; bestScore = sc; }
+  }
+  return bestScore >= 0.5 ? best : null;
 }
 
 export async function tryNlqAnswer(queryText) {
@@ -326,6 +391,20 @@ export async function tryNlqAnswer(queryText) {
   if (entity.type && entity.name && entity.name.length >= 2) {
     pessoa = await lookupPessoaByEntity(entity.type, entity.name);
     pessoaRel = entity.type;
+  } else {
+    const byQuotes = extractQuoted(q);
+    const candidate = byQuotes && byQuotes.length >= 2 ? byQuotes : null;
+    if (candidate) {
+      const any = await lookupPessoaAny(candidate);
+      if (any) {
+        pessoa = any;
+        const rel = String(any.tipo_relacionamento || '').toUpperCase();
+        if (rel.includes('FATURADO')) pessoaRel = 'faturado';
+        else if (rel.includes('FORNECEDOR')) pessoaRel = 'fornecedor';
+        else if (rel.includes('CLIENTE')) pessoaRel = 'cliente';
+        else pessoaRel = 'fornecedor/cliente';
+      }
+    }
   }
 
   const where = [];

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { env, hasAgente3 } from './config/env';
+import { env } from './config/env';
 import { ragSimple, ragEmbeddingsSearch, ragSourceDetails } from './services/rag';
 import type { RagSimpleResponse, RagEmbeddingsResponse } from './services/rag';
+import Screen2 from './Screen2';
 
 interface ExtractedData {
   fornecedor: {
@@ -71,7 +72,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Search state for RAG integrations
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -84,6 +84,7 @@ function App() {
   const [selectedSource, setSelectedSource] = useState<{ id: string; type?: string; title?: string } | null>(null);
   const [sourceDetails, setSourceDetails] = useState<Record<string, unknown> | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
+  const [currentView, setCurrentView] = useState<'home' | 'screen1' | 'screen2'>('home');
 
   const formatValue = (v: unknown) => {
     if (v === null || v === undefined) return 'null';
@@ -217,24 +218,26 @@ function App() {
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
-      
-      const response = await fetch(`${API_BASE_URL}/pdf/extract`, {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const result = await response.json();
-      
+      const tryExtract = async (url: string) => {
+        const res = await fetch(url, { method: 'POST', body: formData });
+        const json = await res.json();
+        return { res, json };
+      };
+      let resp;
+      try {
+        resp = await tryExtract(`${API_BASE_URL}/pdf/extract`);
+      } catch (_) {
+        resp = await tryExtract(`${window.location.origin}/api/pdf/extract`);
+      }
+      const { res: response, json: result } = resp;
       if (!response.ok) {
         throw new Error(result.error || 'Erro ao processar arquivo');
       }
-      
       if (result.success && result.data) {
         setExtractedData(result.data);
       } else {
         throw new Error('Resposta inválida do servidor');
       }
-      
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
@@ -247,9 +250,7 @@ function App() {
     if (extractedData) {
       const jsonString = JSON.stringify(extractedData, null, 2);
       navigator.clipboard.writeText(jsonString).then(() => {
-        setCopied(true);
         setSuccessMessage('JSON copiado!');
-        setTimeout(() => setCopied(false), 1500);
       });
     }
   };
@@ -346,15 +347,22 @@ function App() {
         valorTotal: extractedData.valorTotal || 0
       };
   
-      const response = await fetch(`${VALIDATION_API_URL}/validation/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dadosExtraidos: dadosParaAnalise }),
-      });
-      
-      const result = await response.json();
+      const tryAnalyze = async (url: string) => {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dadosExtraidos: dadosParaAnalise }),
+        });
+        const json = await res.json();
+        return { res, json };
+      };
+      let resp;
+      try {
+        resp = await tryAnalyze(`${VALIDATION_API_URL}/validation/analyze`);
+      } catch (_) {
+        resp = await tryAnalyze(`${window.location.origin}/api/validation/analyze`);
+      }
+      const { res: response, json: result } = resp;
       
       if (!response.ok) {
         throw new Error(result.error || result.message || 'Erro ao analisar dados');
@@ -397,18 +405,22 @@ function App() {
         dataVencimento: extractedData.parcelas?.[0]?.dataVencimento || extractedData.dataEmissao
       };
   
-      const response = await fetch(`${VALIDATION_API_URL}/validation/create-movement`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          dadosExtraidos: dadosParaMovimento, 
-          analise: analysisResult 
-        }),
-      });
-      
-      const result = await response.json();
+      const tryCreate = async (url: string) => {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dadosExtraidos: dadosParaMovimento, analise: analysisResult }),
+        });
+        const json = await res.json();
+        return { res, json };
+      };
+      let resp;
+      try {
+        resp = await tryCreate(`${VALIDATION_API_URL}/validation/create-movement`);
+      } catch (_) {
+        resp = await tryCreate(`${window.location.origin}/api/validation/create-movement`);
+      }
+      const { res: response, json: result } = resp;
       
       if (!response.ok) {
         throw new Error(result.error || result.message || 'Erro ao criar movimento');
@@ -431,13 +443,25 @@ function App() {
   return (
     <div className="app">
       <div className="container">
-        {/* Seção de Upload */}
+        {currentView === 'home' && (
+          <div className="upload-section">
+            <h1 className="main-title">Agroer</h1>
+            <p className="subtitle">Selecione uma opção</p>
+            <div className="analysis-buttons">
+              <button className="analyze-button" onClick={() => setCurrentView('screen1')}>Analisador de NFs</button>
+              <button className="create-movement-button" onClick={() => setCurrentView('screen2')}>Consultar Registros</button>
+            </div>
+          </div>
+        )}
+        {currentView === 'screen1' && (
+        <>
         <div className="upload-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h1 className="main-title">Analisador de NFs</h1>
+            <button className="file-change-btn" onClick={() => setCurrentView('home')}>Voltar</button>
+          </div>
           <a className="help-toggle" onClick={() => setShowHelp(v => !v)} aria-label="Ajuda">?</a>
-          <h1 className="main-title">Agroer</h1>
-          <p className="subtitle">
-            Agroer — Carregue um PDF de nota fiscal e extraia os dados automaticamente usando IA
-          </p>
+          <p className="subtitle">Carregue um PDF de nota fiscal e extraia os dados automaticamente usando IA</p>
           {/* Search bar for future RAG integrations */}
           <form className="search-bar" onSubmit={handleSearchSubmit}>
             <input
@@ -648,9 +672,10 @@ function App() {
 
         {/* Seção de Dados Extraídos */}
         {extractedData && (
-          <div className="extracted-data" role="status" aria-live="polite">
+            <div className="extracted-data" role="status" aria-live="polite">
             <div className="data-header">
               <h2>📄 Dados Extraídos</h2>
+              <button onClick={copyToClipboard} className="copy-button" aria-label="Copiar JSON">📋</button>
               <div className="view-controls">
                 <button 
                   onClick={() => setViewMode('formatted')}
@@ -663,9 +688,6 @@ function App() {
                   className={viewMode === 'json' ? 'active' : ''}
                 >
                   JSON
-                </button>
-                <button onClick={copyToClipboard} className="copy-button">
-                  📋 Copiar JSON
                 </button>
               </div>
             </div>
@@ -844,6 +866,11 @@ function App() {
               </div>
             </div>
           </div>
+        )}
+        </>
+        )}
+        {currentView === 'screen2' && (
+          <Screen2 onBack={() => setCurrentView('home')} />
         )}
       </div>
     </div>
