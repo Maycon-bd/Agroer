@@ -46,3 +46,7 @@ O projeto possui `docker-compose.yml` para frontend, Agente1 e Agente2. Para inc
 2. Extraia dados
 3. Use a barra de pesquisa para testar a integração RAG
 4. Valide e crie movimentos quando disponível
+
+## Configuração local do Gemini
+
+Copie `.env.example` para `.env` na raiz e configure `GOOGLE_GEMINI_API_KEY` apenas nesse arquivo local antes de executar `docker compose up --build`. Em hospedagem, configure a variável no ambiente do backend. Nunca coloque a chave em variáveis `VITE_*`, no repositório ou em arquivos de exemplo.
